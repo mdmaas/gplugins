@@ -4,6 +4,7 @@ import gdsfactory as gf
 import gmsh
 from typing import List, Dict, Literal
 from functools import partial
+from pathlib import Path
 from gdsfactory.generic_tech.layer_map import LAYER
 from gdsfactory.add_padding import add_padding_container, add_padding
 from shapely.geometry import Polygon, MultiPolygon
@@ -138,30 +139,55 @@ if __name__ == "__main__":
     from meshwell.cad import cad
     from meshwell.mesh import mesh
 
-    prisms = get_meshwell_prisms(component=ge_detector_straight_si_contacts(),
-                        layer_stack=get_layer_stack(sidewall_angle_wg=0),
+    my_component = ge_detector_straight_si_contacts()
+    layer_stack = get_layer_stack(sidewall_angle_wg=0)
+
+    prisms = get_meshwell_prisms(component=my_component,
+                        layer_stack=layer_stack,
                         name_by="layer",
                         )
     
-    # Create a surface that lies exactly on the top face of the box
-    boundary_surface = GMSH_entity(
-        gmsh_partial_function=partial(
-            gmsh.model.occ.add_rectangle,
-            x=0.5,
-            y=0.5,
-            z=1.0,  # Exactly on top face boundary
-            dx=1,
-            dy=1,
-        ),
-        physical_name="boundary_surface",
-        mesh_order=2,
-    )    
+    # Create a surface that lies exactly on the front face of the 3D bounding box
+    bbox = my_component.bbox()
+    x_min = bbox.left
+    x_max = bbox.right
+    y_min = bbox.bottom
+    y_max = bbox.top
+    
+    # Get z bounds from layer stack
+    z_values = []
+    for layer_name, layer_level in layer_stack.layers.items():
+        z_values.append(layer_level.zmin)
+        z_values.append(layer_level.zmin + layer_level.thickness)
+    z_min = min(z_values)
+    z_max = max(z_values)
+    
+    # Create a vertical boundary surface using a Prism
+    # Create a surface at the +X side (right face) 
+    from shapely.geometry import box
+    
+    # Create a very thin strip in the XY plane at x=x_max for the boundary
+    # Use a small thickness to avoid zero-area polygon issues
+    boundary_polygon = box(x_max - 0.001, y_min, x_max, y_max)  # Very thin strip at +X side
+    
+    # Create buffers to extrude it vertically (in Z direction)
+    boundary_buffers = {z_min: 0.0, z_max: 0.0}  # No lateral expansion, just vertical extrusion
+    
+    boundary_surface = Prism(
+        polygons=boundary_polygon,
+        buffers=boundary_buffers,
+        physical_name="waveport",
+        mesh_order=1,  # Lower mesh order so it doesn't interfere
+        mesh_bool=False,  # Don't boolean with other geometry
+        additive=False
+    )
 
+    
     entities = [*prisms, boundary_surface]
 
-    cad(entities_list=entities, output_file="meshwell_prisms_3D.xao")
-    mesh(input_file="meshwell_prisms_3D.xao",
-         output_file="meshwell_prisms_3D.msh",
+    cad(entities_list=entities, output_file=Path("meshwell_prisms_3D.xao"))
+    mesh(input_file=Path("meshwell_prisms_3D.xao"),
+         output_file=Path("meshwell_prisms_3D.msh"),
          default_characteristic_length=1000,
          dim=3,
          verbosity=10
