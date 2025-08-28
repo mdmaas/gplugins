@@ -1,14 +1,14 @@
-
-import gdsfactory as gf
-from meshwell.prism import Prism
-from typing import List, Dict
-from shapely.geometry import Polygon, MultiPolygon
 import math
 import kfactory as kf
-from gdsfactory.add_padding import add_padding_container, add_padding
+import gdsfactory as gf
+import gmsh
+from typing import List, Dict, Literal
 from functools import partial
 from gdsfactory.generic_tech.layer_map import LAYER
-from typing import Literal
+from gdsfactory.add_padding import add_padding_container, add_padding
+from shapely.geometry import Polygon, MultiPolygon
+from meshwell.prism import Prism
+from meshwell.gmsh_entity import GMSH_entity
 
 
 def region_to_shapely_polygons(region: kf.kdb.Region) -> List[Polygon]:
@@ -142,8 +142,24 @@ if __name__ == "__main__":
                         layer_stack=get_layer_stack(sidewall_angle_wg=0),
                         name_by="layer",
                         )
+    
+    # Create a surface that lies exactly on the top face of the box
+    boundary_surface = GMSH_entity(
+        gmsh_partial_function=partial(
+            gmsh.model.occ.add_rectangle,
+            x=0.5,
+            y=0.5,
+            z=1.0,  # Exactly on top face boundary
+            dx=1,
+            dy=1,
+        ),
+        physical_name="boundary_surface",
+        mesh_order=2,
+    )    
 
-    cad(entities_list=prisms, output_file="meshwell_prisms_3D.xao")
+    entities = [*prisms, boundary_surface]
+
+    cad(entities_list=entities, output_file="meshwell_prisms_3D.xao")
     mesh(input_file="meshwell_prisms_3D.xao",
          output_file="meshwell_prisms_3D.msh",
          default_characteristic_length=1000,
